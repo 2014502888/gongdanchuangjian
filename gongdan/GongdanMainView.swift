@@ -5,7 +5,6 @@ import UIKit
 struct GongdanMainView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var showWorkOrder = false
-    @State private var showImportAlert = false
     @State private var sessionSummary = ""
 
     private let blue = Color(red: 0.10, green: 0.46, blue: 0.82)
@@ -69,13 +68,9 @@ struct GongdanMainView: View {
                         .cornerRadius(10)
                 }
 
-                // 进入下工单
+                // 进入下工单（未导入会话也可先查看/填写，提交时才需要会话）
                 Button {
-                    if isConfigured {
-                        showWorkOrder = true
-                    } else {
-                        showImportAlert = true
-                    }
+                    showWorkOrder = true
                 } label: {
                     Text("进入下工单")
                         .font(.system(size: 16, weight: .semibold))
@@ -99,11 +94,6 @@ struct GongdanMainView: View {
         .background(colorScheme == .dark ? Color.black : Color(UIColor.systemGroupedBackground))
         .sheet(isPresented: $showWorkOrder) {
             WorkOrderView()
-        }
-        .alert("请先导入抓包", isPresented: $showImportAlert) {
-            Button("知道了", role: .cancel) {}
-        } message: {
-            Text("需要先导入「醒目」App 的 HAR 抓包文件获取会话")
         }
         .onAppear { refreshSummary() }
     }
