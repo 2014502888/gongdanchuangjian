@@ -50,6 +50,11 @@ class Neiwang: NSObject, URLSessionDelegate {
         return json
     }
 
+    /// 供工单模块复用：同一会话 token（同工号两用）
+    func getToken() async throws -> String {
+        try await fetchToken()
+    }
+
     /// 🆕 清除 token 缓存：导入新 HAR 后调用，使新 sessionId 立即生效（无需重启 App）
     func resetToken() {
         tokenLock.lock()
