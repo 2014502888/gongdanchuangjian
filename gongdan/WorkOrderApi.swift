@@ -1,13 +1,14 @@
 import Foundation
 
-/// 下工单网络层：同工号两用（复用 Neiwang 的 sessionId + xmToken）
-/// 流程：getMailDetail → getMailType → checkWorkOrderCreate → checkMailTicketHistory → submitWorkOrder
-/// ⚠️ URL 为按 Python 参考实现（inner_repo.py）推断的模型，待抓包校准后替换（见 TODO）
+/// 下工单网络层：同工号两用（复用 Neiwang 的 sessionId + xmToken + userId）
+/// 流程（已按 2026-10-20 安卓抓包校准）：
+///   getMailDetailInfo → getMailTypeByMailNo → getMailFeatureMessage
+///   → checkMailNoTicketHistory → isOrTicketCreateCondsConfigValidSuceess → (提交接口待补抓)
+/// 字典：getAppType(投诉类型两级) / dictionaryData(收寄人类型) / getPCCById(省市县) / getPoint(动态表单字段)
 final class WorkOrderApi {
 
     static let shared = WorkOrderApi()
     private let baseURL = "http://211.156.201.20:8012"
-    private let userId = "E00000097801"   // 同工号两用：与 Neiwang 的查询工号一致
     private let from = "xm"
 
     private lazy var session: URLSession = {
@@ -17,33 +18,40 @@ final class WorkOrderApi {
     }()
 
     private var sessionId: String { NeiwangHarConfig.shared.sessionId }
+    private var userId: String { NeiwangHarConfig.shared.userId }
 
     // MARK: - 邮件详情（收件人/寄件人省市区代码）
-
-    /// 返回 recvrProCode/recvrCityCode/senderProCode/senderCityCode
+    // 抓包：POST /so-novel-biz/mail/getMailDetailInfo?userId=..&from=xm
+    // body: {"userId","from","mailNo","webType":"creation_create"}
     func getMailDetail(mailNo: String) async throws -> [String: Any] {
-        // TODO: 抓包校准 URL
-        let url = "\(baseURL)/so-novel-biz/mail/getMailDetail?userId=\(userId)&from=\(from)"
+        let url = "\(baseURL)/so-novel-biz/mail/getMailDetailInfo?userId=\(userId)&from=\(from)"
         let body: [String: Any] = ["userId": userId, "from": from, "mailNo": mailNo, "webType": "creation_create"]
-        return try await post(url, body: body, uaOf: .ios)
+        return try await post(url, body: body)
     }
 
-    // MARK: - 邮件类型（客服标准 mailType/serviceType/mailTypeName/serviceTypeName）
-
+    // MARK: - 邮件类型（mailType/serviceType/mailTypeName/serviceTypeName）
+    // 抓包：POST /so-novel-biz/mail/getMailTypeByMailNo?userId=..&from=xm&mailNo=..  （无 body）
     func getMailType(mailNo: String) async throws -> [String: Any] {
-        // TODO: 抓包校准 URL
-        let url = "\(baseURL)/so-novel-biz/mail/getMailType?userId=\(userId)&from=\(from)&mailNo=\(mailNo)"
-        return try await post(url, body: [String: Any](), uaOf: .ios)
+        let url = "\(baseURL)/so-novel-biz/mail/getMailTypeByMailNo?userId=\(userId)&from=\(from)&mailNo=\(mailNo)"
+        return try await post(url, body: [String: Any]())
+    }
+
+    // MARK: - 邮件特征信息（号段特征，判断是否可直接创建）
+    // 抓包：POST /so-novel-biz/mail/getMailFeatureMessage?userId=..&from=xm
+    // body: {"userId","from","mailNo"} → data{done,msg,ticketId}
+    func getMailFeatureMessage(mailNo: String) async throws -> [String: Any] {
+        let url = "\(baseURL)/so-novel-biz/mail/getMailFeatureMessage?userId=\(userId)&from=\(from)"
+        let body: [String: Any] = ["userId": userId, "from": from, "mailNo": mailNo]
+        return try await post(url, body: body)
     }
 
     // MARK: - 校验是否允许创建工单
-
-    /// body 参考 inner_repo.py check_work_order_create
+    // 抓包：POST /so-novel-biz/baseTicket/isOrTicketCreateCondsConfigValidSuceess?from=xm&userId=..
     func checkWorkOrderCreate(mailNo: String, appealType: String, bizType: String,
                               mailType: String, inoutFlag: String,
+                              groupTypeId: String = "1",
                               detail: [String: Any]) async throws -> Bool {
-        // TODO: 抓包校准 URL
-        let url = "\(baseURL)/so-novel-biz/workOrder/checkWorkOrderCreate?userId=\(userId)&from=\(from)"
+        let url = "\(baseURL)/so-novel-biz/baseTicket/isOrTicketCreateCondsConfigValidSuceess?from=\(from)&userId=\(userId)"
         var body: [String: Any] = [
             "configCreateType": "3,4,5",
             "appealType": appealType,
@@ -53,7 +61,7 @@ final class WorkOrderApi {
             "mailType": mailType,
             "inoutFlag": inoutFlag,
             "contactsNo": "",
-            "groupTypeId": "1",
+            "groupTypeId": groupTypeId,
             "deliveryProvince": detail["recvrProCode"] ?? "",
             "deliveryCity": detail["recvrCityCode"] ?? "",
             "arriveCity": detail["recvrCityCode"] ?? "",
@@ -72,7 +80,7 @@ final class WorkOrderApi {
         if let v = detail["senderProCode"] as? String { body["postProvince"] = v }
         if let v = detail["senderCityCode"] as? String { body["postCity"] = v }
 
-        let json = try await post(url, body: body, uaOf: .ios)
+        let json = try await post(url, body: body)
         let code = json["code"] as? Int
         if code == 0 {
             return (json["data"] as? Bool) ?? false
@@ -85,12 +93,10 @@ final class WorkOrderApi {
     }
 
     // MARK: - 校验是否已存在同类型工单
-
-    /// 返回 (allowed, msg, ticketId)
+    // 抓包：POST /so-novel-biz/mail/checkMailNoTicketHistory?from=xm&userId=..
     func checkMailTicketHistory(mailNo: String, appealType: String, bizType: String,
                                 mailType: String, inoutFlag: String) async throws -> (Bool, String, String) {
-        // TODO: 抓包校准 URL
-        let url = "\(baseURL)/so-novel-biz/workOrder/checkMailTicketHistory?userId=\(userId)&from=\(from)"
+        let url = "\(baseURL)/so-novel-biz/mail/checkMailNoTicketHistory?from=\(from)&userId=\(userId)"
         let body: [String: Any] = [
             "userId": userId,
             "from": from,
@@ -104,7 +110,7 @@ final class WorkOrderApi {
             "webType": "creation_create",
             "urgentDegree": 2
         ]
-        let json = try await post(url, body: body, uaOf: .ios)
+        let json = try await post(url, body: body)
         let code = json["code"] as? Int
         if code == 0 {
             let inner = json["data"] as? [String: Any] ?? [:]
@@ -124,12 +130,11 @@ final class WorkOrderApi {
     }
 
     // MARK: - 提交工单
-
+    // ⚠️ 提交接口未在抓包中出现（抓包止于表单填写），URL 为待定占位，需补抓"提交"动作后替换
     func submitWorkOrder(mailNo: String, appealType: String, bizType: String,
                          mailType: String, inoutFlag: String,
                          innerName: String, innerCount: String, innerDetail: String,
                          packageFeature: String, senderPhone: String, recverPhone: String) async throws -> String {
-        // TODO: 抓包校准 URL
         let url = "\(baseURL)/so-novel-biz/workOrder/submitWorkOrder?userId=\(userId)&from=\(from)"
         let body: [String: Any] = [
             "userId": userId,
@@ -147,7 +152,7 @@ final class WorkOrderApi {
             "senderPhone": senderPhone,
             "recverPhone": recverPhone
         ]
-        let json = try await post(url, body: body, uaOf: .ios)
+        let json = try await post(url, body: body)
         let code = json["code"] as? Int
         if code == 0 || (json["success"] as? Bool) == true {
             return json["msg"] as? String ?? "工单提交成功"
@@ -159,9 +164,56 @@ final class WorkOrderApi {
         throw WorkOrderError(msg.isEmpty ? "工单提交失败" : msg)
     }
 
-    // MARK: - 底层 POST（headers 与 Neiwang 一致：iOS 形态）
+    // MARK: - 字典接口（投诉类型 / 收寄人类型 / 省市县 / 表单字段）
 
-    private func post(_ urlString: String, body: [String: Any], uaOf mode: UAMode) async throws -> [String: Any] {
+    /// 投诉类型两级字典
+    /// 抓包：GET /so-novel-biz/dict/getAppType?userId=..&from=xm&type=lw_type_cr&webType=creation_create
+    /// data: [{codeId, codeName, parentId, listAppType:[{codeId, codeName}]}]
+    func getAppType() async throws -> [[String: Any]] {
+        let url = "\(baseURL)/so-novel-biz/dict/getAppType?userId=\(userId)&from=\(from)&type=lw_type_cr&webType=creation_create"
+        let json = try await post(url, body: [String: Any]())
+        return (json["data"] as? [[String: Any]]) ?? []
+    }
+
+    /// 收寄人类型字典
+    /// 抓包：GET /so-novel-biz/dict/dictionaryData?userId=..&from=xm&dictionaryId=CC.GROUP_TYPE
+    /// data: [{name:"收件人",id:"1"}...]
+    func getGroupTypes() async throws -> [[String: Any]] {
+        let url = "\(baseURL)/so-novel-biz/dict/dictionaryData?userId=\(userId)&from=\(from)&dictionaryId=CC.GROUP_TYPE"
+        let json = try await post(url, body: [String: Any]())
+        return (json["data"] as? [[String: Any]]) ?? []
+    }
+
+    /// 省市县字典（parentId=0 取省，省 code 取市，市 code 取县）
+    /// 抓包：GET /so-novel-biz/dict/getPCCById?userId=..&from=xm&parentId=35&type=os.code.province.city
+    /// data: [{codeName:"泉州市", codeValue:"350500"}...]
+    func getPCC(parentId: String) async throws -> [[String: Any]] {
+        let url = "\(baseURL)/so-novel-biz/dict/getPCCById?userId=\(userId)&from=\(from)&parentId=\(parentId)&type=os.code.province.city"
+        let json = try await post(url, body: [String: Any]())
+        return (json["data"] as? [[String: Any]]) ?? []
+    }
+
+    /// 动态表单字段定义（不同投诉类型字段不同）
+    /// 抓包：POST /so-novel-biz/common/getPoint?from=xm&userId=..
+    /// body: {"pageName":"innerCustomer","mailType","inoutFlag","appealType","bizType"}
+    /// data: [{pointName, pointNameCn, isRequired, isShow}...]
+    func getPoint(pageName: String, mailType: String, inoutFlag: String,
+                  appealType: String, bizType: String) async throws -> [[String: Any]] {
+        let url = "\(baseURL)/so-novel-biz/common/getPoint?from=\(from)&userId=\(userId)"
+        let body: [String: Any] = [
+            "pageName": pageName,
+            "mailType": mailType,
+            "inoutFlag": inoutFlag,
+            "appealType": appealType,
+            "bizType": bizType
+        ]
+        let json = try await post(url, body: body)
+        return (json["data"] as? [[String: Any]]) ?? []
+    }
+
+    // MARK: - 底层 POST（headers 与 Neiwang 一致：禁用安卓特征头）
+
+    private func post(_ urlString: String, body: [String: Any]) async throws -> [String: Any] {
         guard let url = URL(string: urlString) else { throw WorkOrderError("URL错误") }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -172,14 +224,8 @@ final class WorkOrderApi {
             request.setValue(cfg.userAgent, forHTTPHeaderField: "User-Agent")
         }
         request.setValue("http://211.156.201.20:8012", forHTTPHeaderField: "Origin")
-        if cfg.isIOS || mode == .ios {
-            request.setValue("http://211.156.201.20:8012/so-novel-xm/", forHTTPHeaderField: "Referer")
-            request.setValue("zh-CN,zh-Hans;q=0.9", forHTTPHeaderField: "Accept-Language")
-        } else {
-            request.setValue("http://211.156.201.20:8012/sowebx/", forHTTPHeaderField: "Referer")
-            request.setValue("com.holly.android.holly.uc_test", forHTTPHeaderField: "X-Requested-With")
-            request.setValue("zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
-        }
+        request.setValue("http://211.156.201.20:8012/so-novel-xm/", forHTTPHeaderField: "Referer")
+        request.setValue("zh-CN,zh-Hans;q=0.9", forHTTPHeaderField: "Accept-Language")
         let token = try await Neiwang.shared.getToken()
         request.setValue("sessionId=\(sessionId); xmToken=\(token)", forHTTPHeaderField: "Cookie")
         if !body.isEmpty {
@@ -200,8 +246,6 @@ final class WorkOrderApi {
         }
         return json
     }
-
-    private enum UAMode { case ios, android }
 }
 
 /// 工单业务错误（非会话失效）
