@@ -175,9 +175,9 @@ final class WorkOrderApi {
         return (json["data"] as? [[String: Any]]) ?? []
     }
 
-    /// 收寄人类型字典
+    /// 投诉人类型字典（谁投诉的）
     /// 抓包：GET /so-novel-biz/dict/dictionaryData?userId=..&from=xm&dictionaryId=CC.GROUP_TYPE
-    /// data: [{name:"收件人",id:"1"}...]
+    /// data: [{name:"收件人",id:"1"},{name:"寄件人",id:"2"},{name:"第三方",id:"5"},{name:"主动客服",id:"9"}]
     func getGroupTypes() async throws -> [[String: Any]] {
         let url = "\(baseURL)/so-novel-biz/dict/dictionaryData?userId=\(userId)&from=\(from)&dictionaryId=CC.GROUP_TYPE"
         let json = try await post(url, body: [String: Any]())

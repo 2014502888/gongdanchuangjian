@@ -87,8 +87,8 @@ struct WorkOrderView: View {
                                   selection: $bizTypeId)
                     }
 
-                    // 收寄人类型
-                    pickerRow("收寄人类型", options: groupOptions, nameKey: "name", idKey: "id", selection: $groupTypeId)
+                    // 投诉人类型（收件人/寄件人/第三方/主动客服）
+                    pickerRow("投诉人类型", options: groupOptions, nameKey: "name", idKey: "id", selection: $groupTypeId)
 
                     // 查询类型按钮
                     Button {
